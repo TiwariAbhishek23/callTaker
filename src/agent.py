@@ -12,6 +12,8 @@ from livekit.agents import (
     cli,
     inference,
     metrics,
+    function_tool,
+    RunContext,
 )
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
@@ -119,8 +121,33 @@ class Assistant(Agent):
             - Do NOT mention internal processes or technical details about how you operate.
 
             Respond to all customer queries based on the above information only.
+
+            Use 'help_request' tool when you cannot answer a customer's question and need supervisor assistance.
+            This should be called when:
+            - A price is not in your knowledge base
+            - A custom request that you don't know how to handle
+            - A complaint, refund, or discount inquiry
+            - Staff availability details
+            - Anything else not in your knowledge base
+            When you call this tool, you should also say: "I'm not entirely sure about that — let me check with my supervisor and get back to you.
             """,
         )
+
+    @function_tool
+    async def help_request(self, question: str):
+        """Use this tool when you cannot answer a customer's question and need supervisor assistance.
+        This should be called when:
+        - A price is not in your knowledge base
+        - A custom request that you don't know how to handle
+        - A complaint, refund, or discount inquiry
+        - Staff availability details
+        - Anything else not in your knowledge base
+        When you call this tool, you should also say: "I'm not entirely sure about that — let me check with my supervisor and get back to you."
+        Args:
+            question: The customer's question that you cannot answer
+        """
+        logger.info(f"Help request tool called with question: {question}")
+        return "Help request logged. A supervisor will get back to you shortly."
 
 
 def prewarm(proc: JobProcess):
