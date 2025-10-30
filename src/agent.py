@@ -124,15 +124,15 @@ class Assistant(Agent):
             - Do NOT mention internal processes or technical details about how you operate.
 
             Respond to all customer queries based on the above information only.
-
-            Use 'help_request' tool when you cannot answer a customer's question and need supervisor assistance.
-            This should be called when:
-            - A price is not in your knowledge base
-            - A custom request that you don't know how to handle
-            - A complaint, refund, or discount inquiry
-            - Staff availability details
-            - Anything else not in your knowledge base
-            When you call this tool, you should also say: "I'm not entirely sure about that — let me check with my supervisor and get back to you.
+            AND ALWAYS REMEMBER THE CONVERSATION AND RESPONSES FOR FUTURE REFERENCE.
+            ### Escalation
+            Use 'help_request' ONLY if:
+            - Price not listed
+            - Staff availability
+            - Complaints/refunds
+            - Discounts/offers
+            - Custom requests not covered
+            When escalating: Say “I'm not entirely sure about that — let me check with my supervisor and get back to you.” and call the tool.
             """,
         )
 
@@ -167,11 +167,11 @@ class Assistant(Agent):
                     else:
                         firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now(), answer="")
                         logger.error(f"Human API returned status code {resp.status}")
-                        return "I'm sorry, I couldn't get a response from my supervisor."
+                        return "I'm sorry, I couldn't get a response from my supervisor. We will get back to you shortly."
         except Exception as e:
                 firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now())
                 logger.error(f"Error calling human API: {e}")
-                return "I'm sorry, I couldn't get a response from my supervisor."
+                return "I'm sorry, I couldn't get a response from my supervisor. We will get back to you shortly."
 
 
 def prewarm(proc: JobProcess):
