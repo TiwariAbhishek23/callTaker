@@ -1,5 +1,5 @@
 import logging
-
+from datetime import datetime
 from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
@@ -15,7 +15,7 @@ from livekit.agents import (
 )
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
-
+from firebase_config import firebase_manager, Conversation, Message
 logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
@@ -133,6 +133,9 @@ async def entrypoint(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
+    session_id = ctx.room.name
+    firebase_manager.create_conversation_session(session_id)
+    logger.info(f"Conversation session created for room: {session_id}")
 
     # Set up a voice AI pipeline using OpenAI, Cartesia, AssemblyAI, and the LiveKit turn detector
     session = AgentSession(
@@ -155,11 +158,39 @@ async def entrypoint(ctx: JobContext):
         metrics.log_metrics(ev.metrics)
         usage_collector.collect(ev.metrics)
 
+    @session.on("conversation_item_added")
+    def _on_conversation_item_added(event):
+        try:
+            chat_message = event.item
+            content = ' '.join(chat_message.content) if isinstance(chat_message.content, list) else str(chat_message.content)
+            role = chat_message.role
+            message = Message(
+                role=role,
+                content=content,
+                timestamp=datetime.now(),
+            )
+
+            firebase_manager.add_message_to_conversation(session_id, message)
+            logger.info(f"Logged message to Firebase for session {session_id}: {role} - {content}")
+
+
+        except Exception as e:
+            logger.error(f"Error handling conversation item added: {e}")
+
     async def log_usage():
         summary = usage_collector.get_summary()
         logger.info(f"Usage: {summary}")
 
+    async def end_conversation_session():
+        try:
+            firebase_manager.end_conversation_session(session_id)
+            logger.info(f"Ended conversation session {session_id}.")
+        except Exception as e:
+            logger.error(f"Error ending conversation session {session_id}: {e}")
+
+
     ctx.add_shutdown_callback(log_usage)
+    ctx.add_shutdown_callback(end_conversation_session)
 
     # Start the session, which initializes the voice pipeline and warms up the models
     await session.start(
