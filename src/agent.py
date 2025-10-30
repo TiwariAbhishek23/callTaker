@@ -141,15 +141,6 @@ class Assistant(Agent):
     @function_tool
     async def help_request(self, question: str) -> str:
         """Use this tool when you cannot answer a customer's question and need supervisor assistance.
-        This should be called when:
-        - A price is not in your knowledge base
-        - A custom request that you don't know how to handle
-        - A complaint, refund, or discount inquiry
-        - Staff availability details
-        - Anything else not in your knowledge base
-        When you call this tool, you should also say: "I'm not entirely sure about that — let me check with my supervisor and get back to you."
-        Args:
-            question: The customer's question that you cannot answer
         """
         logger.info(f"Help request tool called with question: {question}")
         request_id = str(uuid.uuid4())
@@ -157,7 +148,7 @@ class Assistant(Agent):
         help_request = HelpRequest(
             request_id=request_id,
             session_id=self.session_id,
-            message=question
+            question=question,
         )
         firebase_manager.create_help_request(help_request)
 
@@ -169,12 +160,12 @@ class Assistant(Agent):
                         response = data.get("response", "I'm sorry, I couldn't get a response from my supervisor.")
 
 
-                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.RESOLVED, resolved_at=datetime.now())
+                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.RESOLVED, resolved_at=datetime.now(), answer=response)
                         logger.info(f"Received response from human API: {response}")
 
-                        return response
+                        return "My supervisor says: " + response
                     else:
-                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now())
+                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now(), answer="")
                         logger.error(f"Human API returned status code {resp.status}")
                         return "I'm sorry, I couldn't get a response from my supervisor."
         except Exception as e:

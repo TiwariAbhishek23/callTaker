@@ -15,11 +15,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Active WebSocket connections (supervisors / humans)
 connected_humans = set()
-
-# Pending async queries waiting for supervisor response
 pending_queries = {}
+
 
 @app.websocket("/human-loop")
 async def human_loop(websocket: WebSocket):
@@ -34,16 +32,21 @@ async def human_loop(websocket: WebSocket):
             payload = json.loads(data)
             query_id = payload.get("query_id")
             request_id = payload.get("request_id")
-            response_text = payload.get("response")
+            response_text = payload.get("response", "").strip()
 
-            # ✅ Human sent back a response for a pending query
-            if query_id and query_id in pending_queries:
+            # Ignore messages without a real response
+            if not query_id or not response_text:
+                print(f"⚠️ Ignored message without valid response: {payload}")
+                continue
+
+            # ✅ Human sent a valid response
+            if query_id in pending_queries:
                 pending_queries[query_id].set_result({
                     "response": response_text,
                     "request_id": request_id,
                 })
 
-                # Update Firebase help request to RESOLVED
+                # Update Firebase help request only when actual answer is sent
                 if request_id:
                     firebase_manager.update_help_request_status(
                         request_id=request_id,
@@ -51,7 +54,17 @@ async def human_loop(websocket: WebSocket):
                         resolved_at=datetime.now()
                     )
 
-                print(f"🧍 Human resolved query {query_id} -> {response_text}")
+                # Broadcast resolved message to all connected clients
+                resolved_message = {
+                    "type": "help_resolved",
+                    "request_id": request_id,
+                    "query_id": query_id,
+                    "response": response_text,
+                }
+                for ws in connected_humans:
+                    await ws.send_text(json.dumps(resolved_message))
+
+                print(f"🧍 Human resolved query {query_id} → {response_text}")
 
     except WebSocketDisconnect:
         connected_humans.remove(websocket)
@@ -67,32 +80,40 @@ async def send_query(query: dict):
     if not connected_humans:
         return {"error": "no human connected"}
 
-    # Create unique ID for this query and store a future
     query_id = str(id(query))
     fut = asyncio.get_event_loop().create_future()
     pending_queries[query_id] = fut
 
-    # Wrap the query as a help_request message
     message = {
         "type": "help_request",
         "query_id": query_id,
-        **query,  # contains question, request_id, etc.
+        **query,
     }
 
-    # Broadcast to all connected human clients
+    # Broadcast query to all humans
     for ws in connected_humans:
         await ws.send_text(json.dumps(message))
 
-    print(f"📨 Sent help request to humans: {message}")
+    print(f"📨 Sent help request: {message}")
 
     try:
-        # Wait for human response (up to 2 minutes)
+        # Wait for human response
         result = await asyncio.wait_for(fut, timeout=120)
-        print(f"✅ Received human response for query {query_id}: {result}")
+        print(f"✅ Received human response: {result}")
         return result
 
     except asyncio.TimeoutError:
-        print(f"⚠️ No human response for query {query_id}")
+        print(f"⚠️ Timeout: no response for {query_id}")
+
+        # Don’t mark as resolved — mark as expired in Firebase
+        request_id = query.get("request_id")
+        if request_id:
+            firebase_manager.update_help_request_status(
+                request_id=request_id,
+                status=HelpStatus.PENDING,
+                resolved_at=datetime.now()
+            )
+
         return {"answer": "No supervisor response within 120s."}
 
     finally:

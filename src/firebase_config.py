@@ -52,7 +52,8 @@ class HelpStatus:
 class HelpRequest:
     request_id: str
     session_id: str
-    message: str
+    question: str
+    answer: str = ""
     status: str = HelpStatus.PENDING
     created_at: datetime = datetime.now()
     resolved_at: datetime | None = None
@@ -61,7 +62,8 @@ class HelpRequest:
         return {
             "request_id": self.request_id,
             "session_id": self.session_id,
-            "message": self.message,
+            "question": self.question,
+            "answer": self.answer,
             "status": self.status,
             "created_at": self.created_at.isoformat(),
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
@@ -127,11 +129,13 @@ class FirebaseManager:
     def get_help_requests(self):
         return self.db_ref.child("help_requests").get()
 
-    def update_help_request_status(self, request_id: str, status: str, resolved_at: datetime | None = None):
+    def update_help_request_status(self, request_id: str, status: str, resolved_at: datetime | None = None, answer: str = ""):
         help_ref = db.reference(f"/help_requests/{request_id}")
         update_data = {"status": status}
         if resolved_at:
             update_data["resolved_at"] = resolved_at.isoformat()
+        if answer:
+            update_data["answer"] = answer
         help_ref.update(update_data)
         logger.info(f"Updated help request {request_id} to status '{status}'.")
 
