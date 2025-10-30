@@ -1,6 +1,9 @@
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
+import os
+import uuid
+import aiohttp
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -17,14 +20,14 @@ from livekit.agents import (
 )
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from firebase_config import firebase_manager, Conversation, Message
+from firebase_config import firebase_manager, Conversation, Message, HelpRequest, HelpStatus
 logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
-
+HUMAN_API_URL = os.getenv("HUMAN_API_URL")
 
 class Assistant(Agent):
-    def __init__(self) -> None:
+    def __init__(self, session_id: str) -> None:
         super().__init__(
             instructions="""
             You are **“July”**, the friendly and professional virtual receptionist for **Bella Madonna** — a premium beauty and wellness salon located at **DLF Galleria, DLF Phase IV, South Point**.
@@ -133,8 +136,10 @@ class Assistant(Agent):
             """,
         )
 
+        self.session_id = session_id
+
     @function_tool
-    async def help_request(self, question: str):
+    async def help_request(self, question: str) -> str:
         """Use this tool when you cannot answer a customer's question and need supervisor assistance.
         This should be called when:
         - A price is not in your knowledge base
@@ -147,7 +152,35 @@ class Assistant(Agent):
             question: The customer's question that you cannot answer
         """
         logger.info(f"Help request tool called with question: {question}")
-        return "Help request logged. A supervisor will get back to you shortly."
+        request_id = str(uuid.uuid4())
+        payload = {"question": question, "request_id": request_id}
+        help_request = HelpRequest(
+            request_id=request_id,
+            session_id=self.session_id,
+            message=question
+        )
+        firebase_manager.create_help_request(help_request)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post("http://localhost:8000/send-query", json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        response = data.get("response", "I'm sorry, I couldn't get a response from my supervisor.")
+
+
+                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.RESOLVED, resolved_at=datetime.now())
+                        logger.info(f"Received response from human API: {response}")
+
+                        return response
+                    else:
+                        firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now())
+                        logger.error(f"Human API returned status code {resp.status}")
+                        return "I'm sorry, I couldn't get a response from my supervisor."
+        except Exception as e:
+                firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now())
+                logger.error(f"Error calling human API: {e}")
+                return "I'm sorry, I couldn't get a response from my supervisor."
 
 
 def prewarm(proc: JobProcess):
@@ -160,7 +193,7 @@ async def entrypoint(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
-    session_id = ctx.room.name
+    session_id = ctx.job.id
     firebase_manager.create_conversation_session(session_id)
     logger.info(f"Conversation session created for room: {session_id}")
 
@@ -221,7 +254,7 @@ async def entrypoint(ctx: JobContext):
 
     # Start the session, which initializes the voice pipeline and warms up the models
     await session.start(
-        agent=Assistant(),
+        agent=Assistant(session_id=session_id),
         room=ctx.room,
         room_input_options=RoomInputOptions(
             # For telephony applications, use `BVCTelephony` for best results

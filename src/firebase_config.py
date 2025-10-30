@@ -43,6 +43,30 @@ class Conversation:
         self.messages.append(message)
         self.ended_at = datetime.now()
 
+class HelpStatus:
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+
+@dataclass
+class HelpRequest:
+    request_id: str
+    session_id: str
+    message: str
+    status: str = HelpStatus.PENDING
+    created_at: datetime = datetime.now()
+    resolved_at: datetime | None = None
+
+    def to_dict(self):
+        return {
+            "request_id": self.request_id,
+            "session_id": self.session_id,
+            "message": self.message,
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+        }
+
 class FirebaseManager:
     def __init__ (self):
         cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
@@ -93,5 +117,23 @@ class FirebaseManager:
     def get_conversation_session(self, session_id: str):
         conv_ref = self.db_ref.child(session_id)
         return conv_ref.get()
+
+    def create_help_request(self, help_request: HelpRequest):
+        help_ref = db.reference("/help_requests").child(help_request.request_id)
+        help_ref.set(help_request.to_dict())
+        logger.info(f"Created help request {help_request.request_id}.")
+
+
+    def get_help_requests(self):
+        return self.db_ref.child("help_requests").get()
+
+    def update_help_request_status(self, request_id: str, status: str, resolved_at: datetime | None = None):
+        help_ref = db.reference(f"/help_requests/{request_id}")
+        update_data = {"status": status}
+        if resolved_at:
+            update_data["resolved_at"] = resolved_at.isoformat()
+        help_ref.update(update_data)
+        logger.info(f"Updated help request {request_id} to status '{status}'.")
+
 
 firebase_manager = FirebaseManager()
