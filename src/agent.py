@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-import os
 import uuid
 import aiohttp
 from livekit.agents import (
@@ -16,15 +15,13 @@ from livekit.agents import (
     inference,
     metrics,
     function_tool,
-    RunContext,
 )
 from livekit.plugins import noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from firebase_config import firebase_manager, Conversation, Message, HelpRequest, HelpStatus
+from firebase_config import firebase_manager, Message, HelpRequest, HelpStatus
 logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
-HUMAN_API_URL = os.getenv("HUMAN_API_URL")
 
 class Assistant(Agent):
     def __init__(self, session_id: str) -> None:
@@ -132,7 +129,7 @@ class Assistant(Agent):
             - Complaints/refunds
             - Discounts/offers
             - Custom requests not covered
-            When escalating: Say “I'm not entirely sure about that — let me check with my supervisor and get back to you.” and call the tool.
+            When escalating: Say “I'm not entirely sure about that — let me check with my supervisor and get back to you.” and only after this call the tool.
             """,
         )
 
@@ -159,14 +156,13 @@ class Assistant(Agent):
                         data = await resp.json()
                         response = data.get("response", "I'm sorry, I couldn't get a response from my supervisor.")
 
-
                         firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.RESOLVED, resolved_at=datetime.now(), answer=response)
                         logger.info(f"Received response from human API: {response}")
 
                         return "My supervisor says: " + response
                     else:
                         firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now(), answer="")
-                        logger.error(f"Human API returned status code {resp.status}")
+                        logger.error(f"Returned status code {resp.status}")
                         return "I'm sorry, I couldn't get a response from my supervisor. We will get back to you shortly."
         except Exception as e:
                 firebase_manager.update_help_request_status(request_id=request_id, status=HelpStatus.IN_PROGRESS, resolved_at=datetime.now())
